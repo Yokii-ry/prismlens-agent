@@ -8,7 +8,6 @@ PrismLens has a FastAPI backend, an ARQ worker, Redis, PostgreSQL, and a Next.js
 prismlens/
 ├── backend/          # FastAPI 后端、数据库模型、API 路由、任务队列 worker、迁移和测试
 ├── frontend/         # Next.js 前端页面、组件、样式和前端工具函数
-├── demo归档/         # 早期调试/实验脚本，偏演示和归档用途
 ├── docker-compose.yml# 本地容器编排配置
 ├── Makefile          # 常用启动、测试、迁移命令入口
 ├── VERSIONING.md     # 版本管理说明
