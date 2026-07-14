@@ -1,9 +1,13 @@
 # ARQ Worker Task
 # 非手动调用
+import json
 import uuid
 
 from arq.connections import RedisSettings
-from app.db.crud import update_task_status,create_task
+import redis.asyncio as aioredis
+from app.core.config import settings
+from app.core.debug_log import debug_panel
+from app.db.curd import update_task_status
 from app.db.models import TaskStatus
 from app.db.session import AsyncSessionLocal
 from app.pipeline.graph import build_graph
@@ -21,48 +25,97 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
     返回:
         dict: 任务结果
     """
-    print(f"ARQ Worker收到任务: {event_query},开始跑图,任务id: {ctx['task_id']}")
+    debug_panel(
+        "worker",
+        "收到研究任务",
+        {"task_id": task_id, "event_query": event_query},
+    )
 
     #task_id从字符串转回UUID类型，数据库操作需要UUID类型
-    task_uuid = uuid.UUID(ctx['task_id'])
+    task_uuid = uuid.UUID(str(task_id))
+    channel = f"multiprism:progress:{task_uuid}"
+    redis = aioredis.from_url(settings.REDIS_URL,decode_responses=True)
+
+    async def publish_progress(payload: dict) -> None:
+        await redis.publish(channel,json.dumps(payload,ensure_ascii=False))
+
     #步骤一：work任务状态从PENDING更新为RUNNING
     async with AsyncSessionLocal() as db:
         await update_task_status(db,task_uuid,TaskStatus.RUNNING)
    
   # 步骤二：构建图，配置checkpoint
     try:
-        from langgraph.checkpoint.memory import MemorySaver
-        checkpointSaver = MemorySaver()
-        graph = build_graph().compile(checkpointer=checkpointSaver)
-        #用task_id作为checkpoint的thread_id
-        config ={"configurable":{"thread_id":task_uuid}}
-        #步骤三：运行图，传入初始状态
-        #ainvoke是invoke的异步版本，返回一个协程对象，需要await执行
-        result = await graph.ainvoke(
-            PrismState(
-              event_query=event_query,
-              search_queries=[],
-              raw_results=[],
-              retry_count=0
-            ),
-            config=config
+        await publish_progress({"event":"started"})
+
+        from app.pipeline.checkpoint import get_checkpointer
+        async with get_checkpointer() as checkpointer:
+            graph = build_graph(checkpointer=checkpointer)
+            #用task_id作为checkpoint的thread_id
+            config ={"configurable":{"thread_id":task_uuid}}
+            #步骤三：运行图，传入初始状态
+            #astream会在每个节点完成后产出增量，方便同步推送SSE进度
+            result: dict = {}
+            async for chunk in graph.astream(
+                PrismState(
+                  event_query=event_query,
+                  search_queries=[],
+                  raw_results=[],
+                  retry_count=0
+                ),
+                config=config,
+                # 增量更新模式，只更新变化的部分，避免重复计算
+                stream_mode="updates"
+            ):
+                for node_name,node_result in chunk.items():
+                    await publish_progress({"event":"step","node":node_name})
+                    debug_panel(
+                        "worker",
+                        "研究图节点完成",
+                        {"task_id": str(task_uuid), "node": node_name, "updates": node_result},
+                        status="success",
+                    )
+                    if isinstance(node_result,dict):
+                        result.update(node_result)
+
+        debug_panel(
+            "worker",
+            "研究图完成",
+            {
+                "task_id": str(task_uuid),
+                "raw_result_count": len(result.get("raw_results", [])),
+                "result": result,
+            },
+            status="success",
         )
-        print(f"图运行完成,结果: {result}")
+        final_report = result.get("final_report")
+        if final_report is None:
+            final_report = {
+                "raw_results": result.get("raw_results", []),
+            }
         #步骤四：把结果写进数据库，更新任务状态为COMPLETED
         async with AsyncSessionLocal() as db:
             await update_task_status(
                 db,
                 task_uuid,
                 TaskStatus.COMPLETED,
-                # 把raw_results作为最终报告存进去
-                # !!TODO synthesize节点做好以后，换成真正完整的报告
-                final_report={
-                    "raw_results":result.get("raw_results",[]),
-                }
+                # 把final_report作为最终报告存进去
+                final_report=final_report
             )
+        await publish_progress({"event":"complete","report":final_report})
+        debug_panel(
+            "worker",
+            "研究图跑完了，更新任务状态为COMPLETED",
+            {"task_id": str(task_uuid), "report": final_report},
+            status="success",
+        )
     except Exception as exc:
         # 捕获异常，更新任务状态为FAILED，记录异常信息
-        print(f"图运行失败,任务id: {task_uuid},异常: {exc}")
+        debug_panel(
+            "worker",
+            "研究图跑失败，更新任务状态为FAILED",
+            {"task_id": str(task_uuid), "error": str(exc)},
+            status="error",
+        )
         async with AsyncSessionLocal() as db:
             await update_task_status(
                 db,
@@ -70,14 +123,16 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
                 TaskStatus.FAILED,
                 error_message=str(exc)
             )
+        await publish_progress({"event":"error","message":str(exc)})
+    finally:
+        await redis.aclose()
 
 # ARQ worker的配置类，告诉ARQ这个worker可以运行哪些函数
-class workerSettings:
+class WorkerSettings:
     # 注册任务函数，worker启动后只会处理这里列举的函数
     functions = [run_research_graph]
     # redis连接配置，worker靠这个连上队列
-    redis_settings = RedisSettings.from_dsn('redis://localhost:6379/0')
+    redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
 
     # 同时处理的最大任务数，避免同时处理太多任务，导致内存不足
     max_jobs = 2
-

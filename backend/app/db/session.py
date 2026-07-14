@@ -8,9 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # 一个普通 Python 类才会被 SQLAlchemy 识别成"对应一张数据库表"
 from sqlalchemy.orm import DeclarativeBase
 
+# 从config.py中导入settings
+from app.core.config import settings
+
 # 数据库连接字符串，格式是：数据库类型+驱动名://用户名:密码@主机:端口/数据库名
 # 这里用 asyncpg 驱动（异步），对应你之前 docker run 时设置的用户名密码
-DATABASE_URL = "postgresql+asyncpg://multiprism:multiprism@localhost:5432/multiprism"
+DATABASE_URL = settings.DATABASE_URL
 
 # 创建数据库引擎，整个应用生命周期内只需要一个引擎实例（这里创建一次，全局复用）
 # echo=True 表示把每一条实际执行的 SQL 打印到终端，方便开发时观察，上线后改成 False
@@ -26,6 +29,11 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
     class_=AsyncSession,
 )
+
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 # 定义所有 ORM 模型的公共基类
