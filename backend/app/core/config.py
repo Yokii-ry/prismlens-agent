@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # 数据库连接字符串
     # 应用本身用asyncpg驱动（异步），所以是postgresql+asyncpg
-    DATABASE_URL: str = "postgresql+asyncpg://multiprism:123456@localhost:5432/multiprism"
+    DATABASE_URL: str = "postgresql+asyncpg://multiprism:multiprism@localhost:5432/multiprism"
     # Redis连接字符串
     REDIS_URL: str = "redis://localhost:6379/0"
 
@@ -33,6 +33,21 @@ class Settings(BaseSettings):
 
     # front web url,cors跨域请求需要
     FRONTEND_URL: str = "http://localhost:7777"
+    # 逗号分隔的前端来源。保留 FRONTEND_URL 是为了兼容旧配置。
+    CORS_ALLOWED_ORIGINS: str = "http://localhost:7777,http://127.0.0.1:7777"
+    # 开发时常用局域网 IP 访问 Next.js，例如 http://192.168.0.6:7777
+    CORS_ALLOWED_ORIGIN_REGEX: str = r"^http://192\.168\.\d{1,3}\.\d{1,3}:7777$"
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        origins = [
+            origin.strip()
+            for origin in self.CORS_ALLOWED_ORIGINS.split(",")
+            if origin.strip()
+        ]
+        if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
+            origins.append(self.FRONTEND_URL)
+        return origins
 
 #创建一个单例实例，方便在其他地方统一导入
 settings = Settings()

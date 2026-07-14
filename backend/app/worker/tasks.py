@@ -27,7 +27,7 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
     """
     debug_panel(
         "worker",
-        "received research task",
+        "收到研究任务",
         {"task_id": task_id, "event_query": event_query},
     )
 
@@ -47,38 +47,39 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
     try:
         await publish_progress({"event":"started"})
 
-        from langgraph.checkpoint.memory import MemorySaver
-        checkpointSaver = MemorySaver()
-        graph = build_graph(checkpointer=checkpointSaver)
-        #用task_id作为checkpoint的thread_id
-        config ={"configurable":{"thread_id":task_uuid}}
-        #步骤三：运行图，传入初始状态
-        #astream会在每个节点完成后产出增量，方便同步推送SSE进度
-        result: dict = {}
-        async for chunk in graph.astream(
-            PrismState(
-              event_query=event_query,
-              search_queries=[],
-              raw_results=[],
-              retry_count=0
-            ),
-            config=config,
-            stream_mode="updates"
-        ):
-            for node_name,node_result in chunk.items():
-                await publish_progress({"event":"step","node":node_name})
-                debug_panel(
-                    "worker",
-                    "graph node completed",
-                    {"task_id": str(task_uuid), "node": node_name, "updates": node_result},
-                    status="success",
-                )
-                if isinstance(node_result,dict):
-                    result.update(node_result)
+        from app.pipeline.checkpoint import get_checkpointer
+        async with get_checkpointer() as checkpointer:
+            graph = build_graph(checkpointer=checkpointer)
+            #用task_id作为checkpoint的thread_id
+            config ={"configurable":{"thread_id":task_uuid}}
+            #步骤三：运行图，传入初始状态
+            #astream会在每个节点完成后产出增量，方便同步推送SSE进度
+            result: dict = {}
+            async for chunk in graph.astream(
+                PrismState(
+                  event_query=event_query,
+                  search_queries=[],
+                  raw_results=[],
+                  retry_count=0
+                ),
+                config=config,
+                # 增量更新模式，只更新变化的部分，避免重复计算
+                stream_mode="updates"
+            ):
+                for node_name,node_result in chunk.items():
+                    await publish_progress({"event":"step","node":node_name})
+                    debug_panel(
+                        "worker",
+                        "研究图节点完成",
+                        {"task_id": str(task_uuid), "node": node_name, "updates": node_result},
+                        status="success",
+                    )
+                    if isinstance(node_result,dict):
+                        result.update(node_result)
 
         debug_panel(
             "worker",
-            "graph completed",
+            "研究图完成",
             {
                 "task_id": str(task_uuid),
                 "raw_result_count": len(result.get("raw_results", [])),
@@ -101,11 +102,17 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
                 final_report=final_report
             )
         await publish_progress({"event":"complete","report":final_report})
+        debug_panel(
+            "worker",
+            "研究图跑完了，更新任务状态为COMPLETED",
+            {"task_id": str(task_uuid), "report": final_report},
+            status="success",
+        )
     except Exception as exc:
         # 捕获异常，更新任务状态为FAILED，记录异常信息
         debug_panel(
             "worker",
-            "graph failed",
+            "研究图跑失败，更新任务状态为FAILED",
             {"task_id": str(task_uuid), "error": str(exc)},
             status="error",
         )

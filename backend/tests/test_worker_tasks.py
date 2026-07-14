@@ -27,6 +27,14 @@ class _FakeCompiledGraph:
         yield {"generate_report": {"final_report": {"summary": "report from graph"}}}
 
 
+class _FakeCheckpointerContext:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
 class WorkerTasksTest(unittest.IsolatedAsyncioTestCase):
     async def test_run_research_graph_uses_task_id_argument_from_arq_job(self) -> None:
         task_id = uuid.uuid4()
@@ -36,6 +44,7 @@ class WorkerTasksTest(unittest.IsolatedAsyncioTestCase):
             patch.object(tasks, "AsyncSessionLocal", return_value=_FakeSessionContext()),
             patch.object(tasks, "update_task_status", new_callable=AsyncMock) as update_task_status,
             patch.object(tasks, "build_graph", return_value=_FakeCompiledGraph()),
+            patch("app.pipeline.checkpoint.get_checkpointer", return_value=_FakeCheckpointerContext()),
             patch("redis.asyncio.from_url", return_value=redis),
         ):
             await tasks.run_research_graph(

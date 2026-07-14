@@ -68,6 +68,21 @@ class TaskRoutesTest(unittest.TestCase):
         self.assertEqual(response.json()["message"], "Validation error")
         get_task.assert_not_called()
 
+    def test_cors_allows_lan_frontend_origin(self) -> None:
+        response = self.client.options(
+            "/api/tasks",
+            headers={
+                "Origin": "http://192.168.0.6:7777",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "http://192.168.0.6:7777",
+        )
+
     def test_rate_limited_error_returns_standard_response(self) -> None:
         response = self.client.get("/__tests__/rate-limited")
 
