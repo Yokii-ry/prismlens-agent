@@ -5,7 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.errors import AppError
 from app.api.exception_handlers import app_error_handler, internal_error_handler, validation_error_handler
+from app.api.auth import router as auth_router
 from app.api.routes import router
+
 # 生命周期钩子
 from contextlib import asynccontextmanager
 # 初始化checkpoint表
@@ -41,9 +43,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 把路由模块注册进来
-app.include_router(router, prefix="/api/v1")
 app.include_router(router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 # 健康检查接口
 @app.get("/health")

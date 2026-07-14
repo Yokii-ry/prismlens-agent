@@ -33,7 +33,7 @@ async def run_research_graph(ctx:dict,task_id:str,event_query:str) -> dict:
 
     #task_id从字符串转回UUID类型，数据库操作需要UUID类型
     task_uuid = uuid.UUID(str(task_id))
-    channel = f"multiprism:progress:{task_uuid}"
+    channel = settings.progress_channel(task_uuid)
     redis = aioredis.from_url(settings.REDIS_URL,decode_responses=True)
 
     async def publish_progress(payload: dict) -> None:
@@ -135,4 +135,4 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
 
     # 同时处理的最大任务数，避免同时处理太多任务，导致内存不足
-    max_jobs = 2
+    max_jobs = settings.MAX_CONCURRENT_JOBS

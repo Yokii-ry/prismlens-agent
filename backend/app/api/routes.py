@@ -28,10 +28,6 @@ from app.db.session import get_db
 # APIRouter：路由定义和fastApi分开，方便模块化开发
 router = APIRouter(tags=["tasks"])
 
-# !!TODO 占位用户ID，等认证模块写好之后再替换
-PLACEHOLDER_USER_ID = "00000000-0000-0000-0000-000000000001"
-PLACEHOLDER_USER_EMAIL = "placeholder@prismlens.local"
-
 @router.post("/tasks")
 async def create_task(event_query:str,db:AsyncSession=Depends(get_db))->dict:
     """
@@ -42,8 +38,8 @@ async def create_task(event_query:str,db:AsyncSession=Depends(get_db))->dict:
     # 用任务id作为thread_id，方便后续查询,保证唯一性
     thread_id = str(uuid.uuid4())
     # 步骤一：在数据库里写入一条PENDING状态的记录
-    user_id = uuid.UUID(PLACEHOLDER_USER_ID)
-    await ensure_user_exists(db=db,user_id=user_id,email=PLACEHOLDER_USER_EMAIL)
+    user_id = uuid.UUID(settings.PLACEHOLDER_USER_ID)
+    await ensure_user_exists(db=db,user_id=user_id,email=settings.PLACEHOLDER_USER_EMAIL)
     task = await create_research_task(db=db,user_id=user_id,thread_id=thread_id,event_query=event_query)
     # 步骤二： 把任务塞进redis队列，worker会监听这个队列，拿到任务后开始跑图
     redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
@@ -148,8 +144,7 @@ async def stream_task_results(task_id:uuid.UUID,db:AsyncSession=Depends(get_db))
         # 订阅任务专属的publish channel & subscribe channel
         pubsub = r.pubsub()
         # 每个任务有自己的subscribe channel，只订阅自己的进度
-        # 格式是： f"multiprism:progress:{task_id}"
-        channel = f"multiprism:progress:{task_id}"
+        channel = settings.progress_channel(task_id)
         await pubsub.subscribe(channel)
 
         try:

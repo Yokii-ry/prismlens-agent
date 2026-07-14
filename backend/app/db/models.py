@@ -49,7 +49,8 @@ class User(Base):
     # 邮箱字段，最长255字符，unique=True表示不能有两个用户用同一个邮箱
     # index=True表示给这个字段建索引，加快按邮箱查找用户的速度
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-
+    # 密码字段，注册用户存哈希；占位任务用户可以为空
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # 创建时间，server_default=func.now()表示由数据库自动填入"当前时间"，不用应用代码手动赋值
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

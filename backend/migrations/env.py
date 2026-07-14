@@ -12,10 +12,12 @@ from app.db.session import Base
 # 加 noqa: F401 是告诉代码检查工具"这个import看起来没被直接用到，但是有意为之的"
 # 因为只要执行了这个import，类就会注册到Base.metadata里，不需要真的调用里面的内容
 from app.db import models  # noqa: F401
+from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+config.set_main_option("sqlalchemy.url", settings.alembic_database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -1,15 +1,17 @@
-# 应用全局配置，所有环境变量从这个文件读取
+# 应用全局配置，所有环境变量从 backend/.env 读取
 # 用pydantic-settings管理配置:
 # 1.自动从.env文件读取，不用手动os.environ.get(...)
 # 2.有类型校验
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
 class Settings(BaseSettings):
-    # settingsConfigDict:设置配置文件的读取方式,默认是dotenv，这里改为env
-    # env_file=".env",表示从根目录的.env文件读取
-    # env_file_encoding="utf-8",表示文件编码为utf-8,不会出现中文乱码
+    # env_file 使用绝对路径，确保从项目根目录或 backend/ 目录启动时都读取同一个文件。
     model_config = SettingsConfigDict(
-        env_file=(".env", "backend/.env"),
+        env_file=BACKEND_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -24,12 +26,29 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.deepseek.com"
     OPENAI_MODEL: str = "deepseek-chat"
+    OPENAI_TEMPERATURE: float = 0
     
     # !!TODO搜索引擎相关,先预留
-    TAVILY_API_KEY: str = "tavily-a4220804343a47468f05168365987969"
+    TAVILY_API_KEY: str = ""
+    TAVILY_MAX_RESULTS: int = 3
 
     # worker并发限制，最多跑几个实例
     MAX_CONCURRENT_JOBS: int = 2
+
+    # pipeline运行策略
+    PIPELINE_MAX_RETRIES: int = 2
+    REFLECT_RESULT_CONTENT_CHARS: int = 200
+    REPORT_RESULT_CONTENT_CHARS: int = 300
+    REDIS_PROGRESS_CHANNEL_PREFIX: str = "multiprism:progress:"
+
+    # 临时用户配置。接入真实认证后可以删除。
+    PLACEHOLDER_USER_ID: str = "00000000-0000-0000-0000-000000000001"
+    PLACEHOLDER_USER_EMAIL: str = "placeholder@prismlens.local"
+
+    # JWT相关
+    JWT_SECRET_KEY: str = "3a6ae5d6f371b330203f3a75cb6e8267bf89d7fc36caaae584df0fa8d97591c5"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     # front web url,cors跨域请求需要
     FRONTEND_URL: str = "http://localhost:7777"
@@ -48,6 +67,16 @@ class Settings(BaseSettings):
         if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
             origins.append(self.FRONTEND_URL)
         return origins
+
+    @property
+    def alembic_database_url(self) -> str:
+        return self.DATABASE_URL.replace(
+            "postgresql+asyncpg://",
+            "postgresql+psycopg2://",
+        )
+
+    def progress_channel(self, task_id: object) -> str:
+        return f"{self.REDIS_PROGRESS_CHANNEL_PREFIX}{task_id}"
 
 #创建一个单例实例，方便在其他地方统一导入
 settings = Settings()

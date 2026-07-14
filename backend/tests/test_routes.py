@@ -2,12 +2,13 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
 from app.api.errors import AppError, ErrorCode
 from app.api import routes
+from app.core.security import hash_password
 from app.db.models import TaskStatus
 from app.db.session import get_db
 from main import app
@@ -15,6 +16,13 @@ from main import app
 
 async def override_get_db():
     yield object()
+
+
+def override_db_with(db):
+    async def _override_get_db():
+        yield db
+
+    return _override_get_db
 
 
 @app.get("/__tests__/rate-limited")
@@ -60,7 +68,7 @@ class TaskRoutesTest(unittest.TestCase):
 
     def test_get_task_status_rejects_malformed_task_id_before_database_lookup(self) -> None:
         with patch.object(routes, "get_task", new_callable=AsyncMock, return_value=None) as get_task:
-            response = self.client.get("/api/v1/tasks/12")
+            response = self.client.get("/api/tasks/12")
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["code"], "VALIDATION_ERROR")
@@ -143,7 +151,7 @@ class TaskRoutesTest(unittest.TestCase):
         task_id = uuid.uuid4()
 
         with patch.object(routes, "get_task", new_callable=AsyncMock, return_value=None):
-            response = self.client.get(f"/api/v1/tasks/{task_id}")
+            response = self.client.get(f"/api/tasks/{task_id}")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(
@@ -168,7 +176,7 @@ class TaskRoutesTest(unittest.TestCase):
         )
 
         with patch.object(routes, "get_task", new_callable=AsyncMock, return_value=task):
-            response = self.client.get(f"/api/v1/tasks/{task_id}")
+            response = self.client.get(f"/api/tasks/{task_id}")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["code"], "OK")
@@ -196,7 +204,7 @@ class TaskRoutesTest(unittest.TestCase):
             patch.object(routes, "create_research_task", new_callable=AsyncMock, return_value=task),
             patch.object(routes, "create_pool", new_callable=AsyncMock, return_value=redis),
         ):
-            response = self.client.post("/api/v1/tasks", params={"event_query": "政策影响分析"})
+            response = self.client.post("/api/tasks", params={"event_query": "政策影响分析"})
 
         ensure_user_exists.assert_awaited_once()
         self.assertEqual(response.status_code, 200)
@@ -213,7 +221,7 @@ class TaskRoutesTest(unittest.TestCase):
             },
         )
 
-    def test_create_task_is_available_on_unversioned_api_prefix(self) -> None:
+    def test_create_task_uses_single_api_prefix(self) -> None:
         task_id = uuid.uuid4()
         task = SimpleNamespace(id=task_id)
         redis = AsyncMock()
@@ -229,7 +237,109 @@ class TaskRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["task_id"], str(task_id))
 
-    def test_get_task_status_is_available_on_unversioned_api_prefix(self) -> None:
+    def test_register_returns_standard_success_response(self) -> None:
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+            add=Mock(),
+            commit=AsyncMock(),
+            refresh=AsyncMock(),
+        )
+        app.dependency_overrides[get_db] = override_db_with(db)
+
+        response = self.client.post(
+            "/api/auth/register",
+            json={"email": "new@example.com", "password": "secret123"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], "OK")
+        self.assertEqual(response.json()["status"], "success")
+        self.assertEqual(response.json()["message"], "注册成功")
+        self.assertEqual(response.json()["data"], {"email": "new@example.com"})
+        db.add.assert_called_once()
+        self.assertEqual(db.add.call_args.args[0].email, "new@example.com")
+        self.assertNotEqual(db.add.call_args.args[0].hashed_password, "secret123")
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once()
+
+    def test_register_returns_standard_error_when_user_exists(self) -> None:
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(
+                    scalar_one_or_none=lambda: SimpleNamespace(email="taken@example.com")
+                )
+            )
+        )
+        app.dependency_overrides[get_db] = override_db_with(db)
+
+        response = self.client.post(
+            "/api/auth/register",
+            json={"email": "taken@example.com", "password": "secret123"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "USER_ALREADY_EXISTS",
+                "status": "error",
+                "message": "用户已存在",
+                "data": None,
+            },
+        )
+
+    def test_login_sets_cookie_and_returns_standard_success_response(self) -> None:
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            email="user@example.com",
+            hashed_password=hash_password("secret123"),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: user))
+        )
+        app.dependency_overrides[get_db] = override_db_with(db)
+
+        response = self.client.post(
+            "/api/auth/login",
+            json={"email": "user@example.com", "password": "secret123"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], "OK")
+        self.assertEqual(response.json()["status"], "success")
+        self.assertEqual(response.json()["message"], "登录成功")
+        self.assertEqual(response.json()["data"], {"email": "user@example.com"})
+        self.assertIn("access_token=", response.headers["set-cookie"])
+        self.assertIn("HttpOnly", response.headers["set-cookie"])
+
+    def test_login_returns_standard_error_for_bad_credentials(self) -> None:
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            email="user@example.com",
+            hashed_password=hash_password("secret123"),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: user))
+        )
+        app.dependency_overrides[get_db] = override_db_with(db)
+
+        response = self.client.post(
+            "/api/auth/login",
+            json={"email": "user@example.com", "password": "wrong-password"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {
+                "code": "INVALID_CREDENTIALS",
+                "status": "error",
+                "message": "用户名或密码错误",
+                "data": None,
+            },
+        )
+
+    def test_get_task_status_uses_single_api_prefix(self) -> None:
         task_id = uuid.uuid4()
         task = SimpleNamespace(
             id=task_id,
@@ -256,13 +366,18 @@ class TaskRoutesTest(unittest.TestCase):
         )
 
         with patch.object(routes, "get_task", new_callable=AsyncMock, return_value=task):
-            response = self.client.get(f"/api/v1/tasks/{task_id}/stream")
+            response = self.client.get(f"/api/tasks/{task_id}/stream")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.text,
             'data: {"event": "complete", "report": {"raw_results": ["done"]}}\n\n',
         )
+
+    def test_versioned_api_prefix_is_not_registered(self) -> None:
+        response = self.client.get(f"/api/v1/tasks/{uuid.uuid4()}")
+
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

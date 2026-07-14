@@ -47,3 +47,41 @@ test("getTask dedupes concurrent requests for the same task", async () => {
   assert.equal(calls.length, 1);
   assert.deepEqual(first, second);
 });
+
+test("createTask uses the unversioned API prefix by default", async () => {
+  const previousApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  delete process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  try {
+    const { createTask } = await loadApiModule();
+    const calls = [];
+
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({
+          status: "success",
+          message: "Task created",
+          data: {
+            task_id: "task-1",
+            task_status: "pending",
+          },
+        }),
+      };
+    };
+
+    await createTask("query");
+
+    assert.equal(
+      calls[0],
+      "http://127.0.0.1:8000/api/tasks?event_query=query"
+    );
+  } finally {
+    if (previousApiBaseUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    } else {
+      process.env.NEXT_PUBLIC_API_BASE_URL = previousApiBaseUrl;
+    }
+  }
+});

@@ -4,20 +4,25 @@ from unittest.mock import patch
 from app.pipeline import nodes
 
 
+class _FakeTavilyClient:
+    def search(self, *args, **kwargs):
+        return {
+            "results": [
+                {
+                    "title": "报道标题",
+                    "url": "https://example.com/report",
+                    "content": "报道摘要",
+                }
+            ]
+        }
+
+
 class PipelineNodesTest(unittest.IsolatedAsyncioTestCase):
     async def test_search_node_collects_tavily_results(self) -> None:
         with patch.object(
-            nodes.tavily_client,
-            "search",
-            return_value={
-                "results": [
-                    {
-                        "title": "报道标题",
-                        "url": "https://example.com/report",
-                        "content": "报道摘要",
-                    }
-                ]
-            },
+            nodes,
+            "get_tavily_client",
+            return_value=_FakeTavilyClient(),
         ):
             result = await nodes.search_node(
                 {

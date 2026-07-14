@@ -1,5 +1,7 @@
 // 后端接口地址，开发阶段指向本地FastAPI
-const API_BASE = "http://127.0.0.1:8000/api";
+const API_BASE = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api"
+).replace(/\/$/, "");
 
 interface ApiResponse<T> {
   code: string;

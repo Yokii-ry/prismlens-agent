@@ -66,27 +66,27 @@ class WorkerTasksTest(unittest.IsolatedAsyncioTestCase):
             {"summary": "report from graph"},
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "started"}',
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "step", "node": "plan"}',
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "step", "node": "search"}',
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "step", "node": "reflect"}',
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "step", "node": "generate_report"}',
         )
         redis.publish.assert_any_await(
-            f"multiprism:progress:{task_id}",
+            tasks.settings.progress_channel(task_id),
             '{"event": "complete", "report": {"summary": "report from graph"}}',
         )
         redis.aclose.assert_awaited_once()

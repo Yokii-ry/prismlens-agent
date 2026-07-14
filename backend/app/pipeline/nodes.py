@@ -28,14 +28,17 @@ def get_llm() -> ChatOpenAI:
     # temperature=0 表示输出尽量稳定，不需要随机发挥-需要结构化输出的场景很重要
     return ChatOpenAI(
         model=settings.OPENAI_MODEL,
-        temperature=0,
+        temperature=settings.OPENAI_TEMPERATURE,
         api_key=settings.OPENAI_API_KEY,
         base_url=settings.OPENAI_BASE_URL,
     )
 
 
-# 初始化tavily搜索客户端
-tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+@lru_cache(maxsize=1)
+def get_tavily_client() -> TavilyClient:
+    if not settings.TAVILY_API_KEY:
+        raise RuntimeError("TAVILY_API_KEY 未配置，请在 backend/.env 中填写 Tavily API key")
+    return TavilyClient(api_key=settings.TAVILY_API_KEY)
 
 
 # 第一步节点：生成搜索关键词
@@ -89,9 +92,9 @@ async def search_node(state: PrismState) -> dict:
             # 因tavily.search是同步的，所以需要用asyncio.to_thread包装一下
             # include_raw_content=false 表示只要摘要，不要正文（省token）
             results = await asyncio.to_thread(
-                tavily_client.search,
+                get_tavily_client().search,
                 query,
-                max_results=3,
+                max_results=settings.TAVILY_MAX_RESULTS,
                 include_raw_content=False,
             )
             # results["results"] 是列表，每个元素是一个字典，包含title, url, content
@@ -142,7 +145,10 @@ async def reflect_node(state: PrismState) -> dict:
 
     # 把搜索结果整理成文字，让llm进行评估
     results_text = "\n".join(
-        [f"- [{r['title']}]({r['url']})：{r['content'][:200]}" for r in raw_results]
+        [
+            f"- [{r['title']}]({r['url']})：{r['content'][:settings.REFLECT_RESULT_CONTENT_CHARS]}"
+            for r in raw_results
+        ]
     )
     response = await get_llm().ainvoke(
         f"""你是一个媒体分析助手，正在评估以下搜索结果是否覆盖了足够多样的立场：
@@ -192,7 +198,7 @@ async def reflect_node(state: PrismState) -> dict:
 
 # 第四步节点：根据搜索结果，判断是否需要重试
 def should_continue(state: PrismState) -> str:
-    should_continue = state["retry_count"] < 2
+    should_continue = state["retry_count"] < settings.PIPELINE_MAX_RETRIES
     # 如果搜索结果为空，则重试
     if should_continue:
         debug_panel(
@@ -217,11 +223,7 @@ async def generate_report_node(state: PrismState) -> dict:
 
     # 把所有搜索结果整理成文字，让llm生成最终报告
     results_text = "\n".join([
-        f"- 来源：{r['title']}（{r['url']}）\n  内容：{r['content'][:300]}"
-        for r in raw_results
-    ])
-    results_text = "\n".join([
-        f"- 来源：{r['title']}（{r['url']}）\n  内容：{r['content'][:300]}"
+        f"- 来源：{r['title']}（{r['url']}）\n  内容：{r['content'][:settings.REPORT_RESULT_CONTENT_CHARS]}"
         for r in raw_results
     ])
 
