@@ -69,7 +69,7 @@ After shutting down or restarting your computer, start the project in this order
 ### 1. Go to the project directory
 
 ```bash
-cd /Users/yokili/fy/game/ag/prismlens
+cd "$(git rev-parse --show-toplevel)"
 ```
 
 ### 2. Start infrastructure
@@ -117,7 +117,7 @@ make migrate
 Open a new terminal tab:
 
 ```bash
-cd /Users/yokili/fy/game/ag/prismlens
+cd "$(git rev-parse --show-toplevel)"
 make api
 ```
 
@@ -138,7 +138,7 @@ http://localhost:8000/health
 Open another terminal tab:
 
 ```bash
-cd /Users/yokili/fy/game/ag/prismlens
+cd "$(git rev-parse --show-toplevel)"
 make worker
 ```
 
@@ -149,7 +149,7 @@ The worker processes background research tasks from Redis.
 Open another terminal tab:
 
 ```bash
-cd /Users/yokili/fy/game/ag/prismlens
+cd "$(git rev-parse --show-toplevel)"
 make frontend
 ```
 
